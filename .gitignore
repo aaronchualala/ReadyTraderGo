@@ -1,0 +1,7 @@
+__pycache__/
+
+# these stuff are produced after: python3 rtg.py run [AUTOTRADER FILENAME [AUTOTRADER FILENAME]]
+*.log
+*.dat
+match_events.csv
+score_board.csv
