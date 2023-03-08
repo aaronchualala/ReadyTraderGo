@@ -1,7 +1,7 @@
 __pycache__/
 
-# these stuff are produced after: python3 rtg.py run [AUTOTRADER FILENAME [AUTOTRADER FILENAME]]
+# ignore files produced after the match
 *.log
 *.dat
-match_events.csv
-score_board.csv
+match_events*.csv
+score_board*.csv
