@@ -135,7 +135,7 @@ class AutoTrader(BaseAutoTrader):
                     if self.ask_id != 0:  
                         self.send_cancel_order(self.ask_id)
                         self.ask_id = 0
-                    if self.ask_id == 0 and abs(self.position) < POSITION_LIMIT - LOT_SIZE:
+                    if self.ask_id == 0 and self.position > - POSITION_LIMIT + LOT_SIZE:
                         self.ask_id = next(self.order_ids)
                         self.send_insert_order(self.ask_id, Side.ASK, ask_prices[0], LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                         self.asks.add(self.ask_id)
@@ -146,7 +146,7 @@ class AutoTrader(BaseAutoTrader):
                     if self.bid_id != 0:  
                         self.send_cancel_order(self.bid_id)
                         self.bid_id = 0
-                    if self.bid_id == 0 and abs(self.position) < POSITION_LIMIT - LOT_SIZE:
+                    if self.bid_id == 0 and self.position < POSITION_LIMIT - LOT_SIZE:
                         self.bid_id = next(self.order_ids)
                         self.send_insert_order(self.bid_id, Side.BID, bid_prices[0], LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                         self.bids.add(self.bid_id)
