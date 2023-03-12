@@ -133,7 +133,7 @@ class AutoTrader(BaseAutoTrader):
             multiplier = (abs(midpoint_price_of_etf - midpoint_price_of_future) // TICK_SIZE_IN_CENTS) + 1
             is_positive_position = (self.position >= 0)
 
-            if midpoint_price_of_etf > midpoint_price_of_future:
+            if (midpoint_price_of_etf/midpoint_price_of_future-1)/0.003546 > 1:
 
                 # sell etf
                 if instrument == Instrument.ETF:      
@@ -159,7 +159,7 @@ class AutoTrader(BaseAutoTrader):
                         self.send_insert_order(self.ask_id, Side.ASK, ask_prices[0], volume, Lifespan.GOOD_FOR_DAY)
                         self.asks.add(self.ask_id)
             
-            if midpoint_price_of_etf < midpoint_price_of_future:
+            if (midpoint_price_of_etf/midpoint_price_of_future-1)/0.003546 < -1:
 
                 # buy etf
                 if instrument == Instrument.ETF:   
