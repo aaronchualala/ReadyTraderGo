@@ -1,4 +1,4 @@
-# python3 rtg.py run autotrader_ac_4.py
+# python3 rtg.py run autotrader_ac_1.py autotrader.py
 import asyncio
 import itertools
 
@@ -34,7 +34,6 @@ class AutoTrader(BaseAutoTrader):
         self.ask_price_history_of_etf = []
         self.bid_price_history_of_future = []
         self.ask_price_history_of_future = []
-        self.position_orders = 0 # total etf position in active orders
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
@@ -65,11 +64,9 @@ class AutoTrader(BaseAutoTrader):
         self.logger.info("received order filled for order %d with price %d and volume %d", client_order_id, price, volume)
         if client_order_id in self.bids:
             self.position += volume
-            self.position_orders -= volume
             self.send_hedge_order(next(self.order_ids), Side.ASK, MIN_BID_NEAREST_TICK, volume)
         elif client_order_id in self.asks:
             self.position -= volume
-            self.position_orders += volume
             self.send_hedge_order(next(self.order_ids), Side.BID, MAX_ASK_NEAREST_TICK, volume)
 
     def on_order_status_message(self, client_order_id: int, fill_volume: int, remaining_volume: int,
@@ -84,12 +81,6 @@ class AutoTrader(BaseAutoTrader):
         If an order is cancelled its remaining volume will be zero.
         """
         self.logger.info("received order status for order %d with fill volume %d remaining %d and fees %d", client_order_id, fill_volume, remaining_volume, fees)
-
-        if client_order_id == self.bid_id:
-            self.position_orders -= fill_volume 
-        elif client_order_id == self.ask_id:
-            self.position_orders += fill_volume 
-                
         if remaining_volume == 0:
             if client_order_id == self.bid_id:
                 self.bid_id = 0
@@ -112,6 +103,7 @@ class AutoTrader(BaseAutoTrader):
         """
         self.logger.info("received trade ticks for instrument %d with sequence number %d", instrument, sequence_number)
 
+
     def on_order_book_update_message(self, instrument: int, sequence_number: int, ask_prices: List[int], ask_volumes: List[int], bid_prices: List[int], bid_volumes: List[int]) -> None:
         """Called periodically to report the status of an order book.
 
@@ -121,11 +113,7 @@ class AutoTrader(BaseAutoTrader):
         price levels.
         """
         self.logger.info("received order book for instrument %d with sequence number %d", instrument, sequence_number)
-        # decision-making for etf_ask-etf_bid-price-arbitrage
-            # hmm if I send orders here based on current position, but also send later based on current position, problem?
-            # possibly assign 50 lots for this strat, and 50 lots to the other strat
-
-        # ————————————————————————————————————————————————————————————————————
+        
         # price history updates
         if instrument == Instrument.ETF:
             self.bid_price_history_of_etf.append(bid_prices[0])
@@ -135,59 +123,66 @@ class AutoTrader(BaseAutoTrader):
             self.bid_price_history_of_future.append(bid_prices[0])
             self.ask_price_history_of_future.append(ask_prices[0])
 
-        # the strategy after this applies to etf, we haven't thought of a strategy for future yet
-        if instrument == Instrument.FUTURE:
-            return
+        # calculations
+        if len(self.bid_price_history_of_etf) == len(self.bid_price_history_of_future):
+            midpoint_price_of_etf = (self.bid_price_history_of_etf[-1] + self.ask_price_history_of_etf[-1])//2
+            midpoint_price_of_future = (self.bid_price_history_of_future[-1] + self.
+            ask_price_history_of_future[-1])//2
 
-        is_latest_info = (len(self.bid_price_history_of_etf) == len(self.bid_price_history_of_future))
-        if not is_latest_info:
-            return
+            # order execution
+            multiplier = (abs(midpoint_price_of_etf - midpoint_price_of_future) // TICK_SIZE_IN_CENTS) + 1
+            is_positive_position = (self.position >= 0)
 
-        # define key vars
-        midpoint_price_of_etf = (self.bid_price_history_of_etf[-1] + self.ask_price_history_of_etf[-1])//2
-        midpoint_price_of_future = (self.bid_price_history_of_future[-1] + self.
-        ask_price_history_of_future[-1])//2
-        multiplier = (abs(midpoint_price_of_etf - midpoint_price_of_future) // TICK_SIZE_IN_CENTS) + 1
-        have_an_active_ask = self.ask_id != 0
-        have_an_active_bid = self.bid_id != 0
+            stat_sig = 0.1
+            if (midpoint_price_of_etf/midpoint_price_of_future-1)/0.003546 > stat_sig - stat_sig*(self.position/100):
 
-        # sell logic
-        significant_etf_overpricing = midpoint_price_of_etf > midpoint_price_of_future # (midpoint_price_of_etf/midpoint_price_of_future-1)/0.003546 > 1
-        in_long_etf_position = (self.position_orders >= 0 and (midpoint_price_of_etf/midpoint_price_of_future-1)/0.003546 > 1 - (self.position_orders/100))
+                # sell etf
+                if instrument == Instrument.ETF:      
 
-        should_sell = \
-            significant_etf_overpricing # or in_long_etf_position
-        
-        # buy logic
-        significant_etf_underpricing = midpoint_price_of_etf < midpoint_price_of_future # (midpoint_price_of_etf/midpoint_price_of_future-1)/0.003546 < -1 
-        in_short_etf_position = (self.position_orders < 0 and (midpoint_price_of_etf/midpoint_price_of_future-1)/0.003546 < -1 - (self.position_orders/100))
+                    if self.ask_id != 0:  
+                        self.send_cancel_order(self.ask_id)
+                        self.ask_id = 0
 
-        should_buy = \
-            significant_etf_underpricing # or in_short_etf_position
-        
+                    if self.ask_id == 0 and self.position > - POSITION_LIMIT + LOT_SIZE:
 
-        # decision-making for etf-future-midpoint-price-arbitrage
-        if have_an_active_ask:  
-            self.send_cancel_order(self.ask_id)
-            self.ask_id = 0
-        if have_an_active_bid:  
-            self.send_cancel_order(self.bid_id)
-            self.bid_id = 0
+                        # determine volume
+                        if is_positive_position and (self.position - LOT_SIZE * multiplier >= -100):
+                            volume = LOT_SIZE * multiplier
+                        elif is_positive_position and (self.position - LOT_SIZE * multiplier <= -100):
+                            volume = 100 + self.position
+                        elif not is_positive_position and (self.position - LOT_SIZE * multiplier >= -100):
+                            volume = LOT_SIZE * multiplier
+                        elif not is_positive_position and (self.position - LOT_SIZE * multiplier <= -100):
+                            volume = 100 + self.position
 
-        # ((keep this two vars here to be safe cause exceeded last time))
-        is_within_limit_after_sell = self.position > - POSITION_LIMIT + LOT_SIZE
-        is_within_limit_after_buy = self.position < POSITION_LIMIT - LOT_SIZE
+                        # send order
+                        self.ask_id = next(self.order_ids)
+                        self.send_insert_order(self.ask_id, Side.ASK, ask_prices[0], volume, Lifespan.GOOD_FOR_DAY)
+                        self.asks.add(self.ask_id)
+            
+            if (midpoint_price_of_etf/midpoint_price_of_future-1)/0.003546 < -stat_sig - stat_sig*(self.position/100):
 
-        if should_sell and is_within_limit_after_sell:
-            volume = LOT_SIZE * multiplier if self.position - LOT_SIZE * multiplier >= -100 else 100 + self.position
-            # execute !!
-            self.ask_id = next(self.order_ids)
-            self.send_insert_order(self.ask_id, Side.ASK, self.ask_price_history_of_etf[-1], volume, Lifespan.GOOD_FOR_DAY)
-            self.asks.add(self.ask_id)
-    
-        if should_buy and is_within_limit_after_buy:
-            volume = LOT_SIZE * multiplier if self.position + LOT_SIZE * multiplier <= 100 else 100 - self.position
-            # execute !!
-            self.bid_id = next(self.order_ids)
-            self.send_insert_order(self.bid_id, Side.BID, self.bid_price_history_of_etf[-1], volume, Lifespan.GOOD_FOR_DAY)
-            self.bids.add(self.bid_id)
+                # buy etf
+                if instrument == Instrument.ETF:   
+
+                    if self.bid_id != 0:  
+                        self.send_cancel_order(self.bid_id)
+                        self.bid_id = 0
+
+                    if self.bid_id == 0 and self.position < POSITION_LIMIT - LOT_SIZE:
+
+                        # determine volume
+                        if is_positive_position and (self.position + LOT_SIZE * multiplier <= 100):
+                            volume = LOT_SIZE * multiplier
+                        elif is_positive_position and (self.position + LOT_SIZE * multiplier > 100):
+                            volume = 100 - self.position
+                        elif not is_positive_position and (self.position + LOT_SIZE * multiplier <= 100):
+                            volume = LOT_SIZE * multiplier
+                        elif not is_positive_position and (self.position + LOT_SIZE * multiplier >= 100):
+                            volume = 100 - self.position
+
+                        # send order
+                        volume = (LOT_SIZE * multiplier) if (LOT_SIZE * multiplier + self.position <= 100) else (100 - self.position)
+                        self.bid_id = next(self.order_ids)
+                        self.send_insert_order(self.bid_id, Side.BID, bid_prices[0], volume, Lifespan.GOOD_FOR_DAY)
+                        self.bids.add(self.bid_id)
