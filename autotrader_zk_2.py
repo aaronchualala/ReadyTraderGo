@@ -103,8 +103,6 @@ class AutoTrader(BaseAutoTrader):
         """
         Use a 20 data point rolling average and 5 data point rolling average
         """
-        mavg_20 = self.ETF_bid_hist
-        mavg_5 = 
 
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
         """Called when one of your orders is filled, partially or fully.
